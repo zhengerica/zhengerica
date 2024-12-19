@@ -1,0 +1,83 @@
+#lang racket
+(require json)
+(define input-data (read-json (open-input-file "/Users/ericazheng/Downloads/input.json")))
+
+(define USERS (hash-ref input-data 'users))
+(define PICKUP (hash-ref input-data 'pickupLocations))
+(define DROPOFF (hash-ref input-data 'dropoffLocations))
+(define REQUESTS (hash-ref input-data 'requests))
+
+(define ACCEPTED-REQUESTS
+  (filter (λ (request) (eq? (hash-ref request 'accepted) #t))
+          REQUESTS))
+
+(define (group-by-driver accepted-requests)
+  (define groups (make-hash))
+  (for-each (λ (request)
+            (hash-update! groups (hash-ref request 'driver)
+                          (λ (riders) (cons (hash-ref request 'rider) riders)) '()))
+  ACCEPTED-REQUESTS) groups)
+
+(define groups (group-by-driver ACCEPTED-REQUESTS))
+
+(define PICKUP-VECTOR (list->vector (map list->vector PICKUP)))
+(define DROPOFF-VECTOR (list->vector (map list->vector DROPOFF)))
+
+(define (find-coordinates grid user-id)
+  (for*/or ([x (in-range (vector-length grid))]
+            [y (in-range (vector-length (vector-ref grid 0)))]
+            #:when (= (vector-ref (vector-ref grid x) y) user-id))
+    (list y x)))
+
+(define (average-coordinates coordinates)
+  (list (floor (/ (apply + (map first coordinates))(length coordinates)))
+        (floor (/ (apply + (map second coordinates)) (length coordinates)))))
+  
+(define (averages groups pickup-grid dropoff-grid)
+  (map (λ (group)
+         (hash 'driverId (first group)
+               'riderIds (rest group)
+               'averagePickup (average-coordinates (map (lambda (id) (find-coordinates pickup-grid id)) (cons (first group) (rest group))))
+               'averageDropoff (average-coordinates (map (lambda (id) (find-coordinates dropoff-grid id)) (cons (first group) (rest group))))))
+  (hash->list groups)))
+
+(define (manhattan-distance coord1 coord2)
+  (+ (abs (- (first coord1) (first coord2)))
+     (abs (- (second coord1) (second coord2)))))
+
+(define (sort-groups groups)
+  (map (lambda (group)
+         (hash  'driverId (first group)
+               'riderIds (rest group)
+               'averagePickup
+               (hash 'x (first (average-coordinates
+                               (map (lambda (id) (find-coordinates PICKUP-VECTOR id))
+                                    (cons (first group) (rest group)))))
+                     'y (second (average-coordinates
+                                 (map (lambda (id) (find-coordinates PICKUP-VECTOR id))
+                                      (cons (first group) (rest group))))))
+               'averageDropoff
+               (hash 'x (first (average-coordinates
+                                (map (lambda (id) (find-coordinates DROPOFF-VECTOR id))
+                                     (cons (first group) (rest group)))))
+                     'y (second (average-coordinates
+                                 (map (lambda (id) (find-coordinates DROPOFF-VECTOR id))
+                                      (cons (first group) (rest group))))))))
+       (sort (hash->list groups)
+             (lambda (a b)
+               (< (manhattan-distance
+                   (average-coordinates
+                    (map (lambda (id) (find-coordinates PICKUP-VECTOR id))
+                         (cons (first a) (rest a))))
+                   (average-coordinates
+                    (map (lambda (id) (find-coordinates DROPOFF-VECTOR id))
+                         (cons (first a) (rest a)))))
+                  (manhattan-distance
+                   (average-coordinates
+                    (map (lambda (id) (find-coordinates PICKUP-VECTOR id))
+                         (cons (first b) (rest b))))
+                   (average-coordinates
+                    (map (lambda (id) (find-coordinates DROPOFF-VECTOR id))
+                         (cons (first b) (rest b))))))))))
+
+(define json-output (write-json (sort-groups groups)))
